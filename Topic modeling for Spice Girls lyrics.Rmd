@@ -1,0 +1,372 @@
+---
+title: "Topic modeling for Spice Girls lyrics"
+author: "Sean Ahn"
+date: '2022 1 13 '
+output: 
+  html_document:
+    toc: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+knitr::opts_chunk$set(echo = TRUE)
+theme_set(theme_minimal())
+
+```
+
+## Explore data
+
+https://juliasilge.com/blog/spice-girls/
+
+Our modeling goal is to “discover” topics in the lyrics of Spice Girls songs.   
+Instead of a supervised or predictive model where our observations have labels, this is an unsupervised approach.  
+
+```{r}
+
+lyrics <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-12-14/lyrics.csv")
+
+```
+
+
+```{r}
+lyrics %>% distinct(album_name)
+
+lyrics %>% distinct(album_name, song_name)
+
+```
+
+<br>
+
+먼저 데이터를 한 번 보자.  
+
+
+```{r}
+lyrics %>% view()
+
+```
+
+
+- 가사가 한 행의 데이터에 모두 들어가 있음.  
+
+- 단어들로 나눠서 처리하기 위해 `tidytext` package를 불러옴.  
+
+- 제목에 \x92와 같은 잘못된 글자가 들어가 있으므로 이것을 원래 글자인 '으로 변경하기 위하여 `str_replce_all()`을 사용함.  
+
+- 다음에는 `unnest_tokens()`으로 문장을 단어 단위로 나눔. 결과를 보면 line열에 들어있던 가사가 단어 단위로 나눠져서 word라는 열에 저장됨. 단어 수만큼 행 숫자가 증가함.  
+
+- stopwords를 제거하기 위해서 `anti_join()`을 사용함. `anti_join()`은 filtering join 유형으로 해당 데이터 프레임에 새로운 것이 추가되면서 변형(mutate)되는 것이 아닌 다른 데이터 프레임을 참조해서 필터링 됨. `semi_join()`과 `anti_join()`이 있는데 `semi_join()`은 두 데이터 프레임에 공통된 것을 필터로 찾아서 반환시키고, `anti_join()`은 반대로 두 데이터 프레임에서 공통된 것을 찾아 없애는 역할을 한다. 즉 `anti_join(x,y)`는 y 데이터 프레임에 매칭되지 않고 x 데이터 프레임에 있는 데이터만 반환한다.  
+
+- `get_stopwords()`를 사용하기 위해서는 `stopwords`package에서 stop word lexicon을 가져와야 하기 때문에 `stopwords` package를 설치해야 한다. stopwords(불용어)는 의미가 없는 단어 토큰을 뜻하며, 데이터 처리를 위해서는 갖고 있는 데이터에서 유의미한 단어 토큰만을 선별하기 위해서는 큰 의미가 없는 단어 토큰(=stopwords)을 제거하는 작업이 필요하다. 여기서 큰 의미가 없다라는 것은 자주 등장하지만 분석을 하는 것에 있어서는 큰 도움이 되지 않는 단어들을 말한다. 예를 들면, I, my, me, over, 조사, 접미사 같은 단어들은 문장에서는 자주 등장하지만 실제 의미 분석을 하는데는 거의 기여하는 바가 없는 경우가 있다. 이러한 단어들을 불용어(stopword)라고 하며, 여러 패키지 등에서 특정 영어 단어들을 불용어로 미리 정의하고 있다.
+
+
+```{r}
+library(tidytext)
+
+tidy_lyrics <- 
+  lyrics %>% 
+  mutate(song_name = str_replace_all(song_name, "\x92", "'")) %>% 
+  unnest_tokens(word, line) %>% 
+  anti_join(get_stopwords())
+
+```
+
+- 일단 여기서 현재까지 진행 상황을 정리해본다.  
+
+- `count()`를 이용해서 가장 빈도가 높은 단어를 찾는다. get, love, know, time, wanna ... 등의 순서로 가사에서 많이 나오는 것으로 나타난다.  
+
+- `conut()`에 song_name을 argument로 추가하면 제목과 함께 단어와 빈도수가 출력된다.  
+
+```{r}
+tidy_lyrics %>% count(word, sort = TRUE)
+
+tidy_lyrics %>% count(song_name, word, sort = TRUE)
+
+```
+
+
+## Train topic model
+
+- tidy format은 EDA나 시각화에는 편리하나, 이런 처리를 할 때는 문서 양식의 매트릭스 구조가 더욱 효율적임.  
+
+- 문서양식의 매트릭스 구조를 만들기 위하여 sparse matrix를 생성하는 `cast_sparse()`를 사용  
+
+- `cast_sparse()`에 넣는 argument로는 document 역할을 하는 song_name, term은 word, n은 수량(count)가 있다. 
+
+
+```{r}
+lyrics_sparse <- 
+  tidy_lyrics %>% 
+  count(song_name, word) %>% 
+  cast_sparse(song_name, word, n)
+
+```
+
+- `dim()`의 결과로 나오는 [1] 31 979는 31행 979열로 31행은 데이터에 포함되어 있는 노래(song)가 모두 31곡이라는 의미이고, 979열은 stopwords를 제거한 후에 단어로 구성된 열을 의미한다.  
+
+```{r}
+dim(lyrics_sparse)
+
+```
+
+- lyrics_sparse에 저장된 값을 출력해서 보면 .은 0(zero)를 의미한다.  
+
+- sparse matrix는 어디에 element가 있는지 나타낸다.  
+
+```{r}
+lyrics_sparse
+
+```
+
+- 이제부터 Topic modeling을 한 번 해보자.  
+
+- topic modeling을 위해서는 `stm` package가 필요하다.  
+
+- `stm`package의 메인 함수는 `stm()`으로 도움말을 번역한 내용을 보면 *STM(Structural Topic Model) 추정을 위한 주요 기능입니다. STM은 두 혼합물 성분에 공변량이 있는 혼합물입니다. 사용자는 문서 모음과 여러 주제를 제공합니다. 문서의 각 단어는 정확히 하나의 주제에서 나오며 각 문서는 K개의 각 주제에서 나오는 단어의 비율로 표시됩니다. 이러한 비율은 N(문서 수) x K(사용자 지정 주제 수) 세타 행렬에서 찾을 수 있습니다. K개의 각 주제는 단어에 대한 분포로 표시됩니다. KxV(어휘의 단어 수) 행렬 logbeta에는 주제에 대한 조건부로 각 단어가 표시될 확률의 자연 로그가 포함됩니다.* 이라고 되어 있다.  
+
+- 설명에서 each document라고 표현된 것은 현재 예제에서 each song으로 보면 된다.  
+
+- 단어의 수는 topic을 결정하는데 기여한다고 본다. 
+
+- 도움말 중에 'The most important user input in parametric topic models is the number of topics.'이라고 된 부분이 있다. K-mean을 생각해보면 모델을 만들기 전에는 K값을 알 수 없다. 따라서 데이터 사이즈에 따라 K값을 정해야 하는데 도움말에는 'For short corpora focused on very specific subject matter (such as survey experiments) 3-10 topics is a useful starting range. For small corpora (a few hundred to a few thousand) 5-50 topics is a good place to start. Beyond these rough guidelines it is application specific. Previous applications in political science with medium sized corpora (10k to 100k documents) have found 60-100 topics to work well. For larger corpora 100 topics is a useful default size.'으로 사이즈를 가이드 해준다.  
+
+  - 이 데이터는 매우 작은 사이즈이므로 K = 4 정도로 잡고 모델을 훈련시킨다.   
+
+  - `stm()`으로 모델을 훈련시킨다.  
+
+```{r}
+library(stm)
+
+topic_model <- stm(lyrics_sparse, K = 4)
+
+```
+
+
+- 어떤 식으로 모델링 되었는지 보기 위해 `summary()`를 사용해서 결과를 본다.  
+
+  - 결과를 보면 4개의 주제군으로 묶이고, 31개의 document(노래 곡 수), 979 word directory (979개의 token)로 구성되어 있다고 출력된다.  
+
+```{r}
+summary(topic_model)
+
+```
+
+
+## Explore topic model results
+
+- 좀 더 자세한 설명을 보기 위해 `tidy()`를 이용한다.  
+
+  - argument에 `matrix = "beta"`를 넣지 않아도 beta가 출력된다.  
+  
+  - beta는 topic word의 probability를 나타내는 값이다. 즉 한 topic에서 해당 단어(word)를 발견할 확률이 얼마나 되는지를 나타낸다.  
+  
+  - 예를 들어 baby의 beta값은 topic 1에서 8.22e-3, topic 2에서 1.83e-2 등 매우 낮은 값이다. 참고로 가장 높은 beta값을 가지는 단어는 topic 1의 get으로 beta = 0.0773이다. (이 결과는 실행할 때마다 조금씩 달라지는 듯 하다. 아마 랜덤하게 군집화를 시키기 때문일 것으로 보인다.)  
+  
+  
+
+```{r}
+word_topics <- tidy(topic_model, matrix = "beta")
+
+word_topics
+
+```
+
+- 정리된 결과를 가지고 시각화를 해보자. 
+
+  - topic별로 grouping을 하고, `group_by(topic)`  
+  
+  - `slice_max()`를 사용하여 beat값 기준으로 상위 10개씩만 가져온다.  
+  
+  - `ungroup()`을 해서 grouping된 것을 풀고, (여기서 grouping 된 것을 푸는 이유는 group을 풀지 않고 beta 순서대로 term을 정리하면 topic별로 순서가 매겨지기 때문이다. 다음 단계에서 필요한 것은 topic별로 순서를 만드는 것이 아니라 topic에 관계없이 전체 단어를 beta 순서대로 정리하는 것이기 때문이다.)   
+  
+  - `mutate()`로 term이라는 열을 만들고, `fct_reorder()`로 beta 순서대로 term의 위치를 정렬한다. topic열은 지금은 숫자만으로 topic이 나오는데 시각화를 위해서 숫자 앞에 'Topic'라는 글자가 출력되도록 `paste()`를 써서 변경한다. 예를 들어 '1'이 들어있었다면 'Topic 1'과 같이 출력된다.  
+  
+  - `geom_col`로 bar graph를 만들고 topic별로 facet 한다.  
+  
+  - X축에 그리스어로 beta를 출력하기 위해 `labs()`에 `x = expression(beta)`를 사용한다.  
+
+```{r}
+word_topics %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>% 
+  mutate(term = fct_reorder(term, beta),
+         topic = paste("Topic",topic)) %>% 
+  ggplot(aes(x = beta, y = term, fill = topic)) +
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(vars(topic), scales = "free_y") +
+  labs(x = expression(beta), y = NULL)
+
+```
+
+
+- 위의 그래프를 보면 facet별로 beta값이 정렬되지 않게 나타난다. 이걸 smooth하지 않다고 표현했음.  
+
+- 위에서 분명 `fact_reorder()`로 정리를 했는데 말이다. 이유는 전체 데이터 기준으로 정렬을 하다보니 topic별로 facet을 시키면서 순서가 섞였기 때문이다. 
+
+
+```{r}
+word_topics %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>% 
+  mutate(term = fct_reorder(term, beta),
+         topic = paste("Topic",topic)) %>% 
+  ggplot(aes(x = beta, y = term, fill = topic)) +
+  geom_col(position = "dodge", show.legend = FALSE) + 
+  labs(x = expression(beta), y = NULL)
+
+```
+
+- 그래서 위의 `mutate()`처리 한 것 중 `term = fct_reorder(term, beta)`부분을 삭제하고, ggplot의 `aes()`에 y값(term)을 'reorder_within()`에 넣는다. 이렇게 하는 목적은 facet별로 순서를 재정렬하기 위함이다.  
+
+  - `reorder_within()`의 argument의 의미는 term을 beta 순서대로 정리하는데 facet은 topic으로 할테니 topic별로 beta값 순서에 따라 term을 정리하라는 의미이다.  
+  
+  - `scale_y_reorder()`은 사용하지 않아도 순서는 동일하게 나오나 term 앞에 topic*__ 같은 문자가 붙어 나오기 때문에 이를 제거하기 위한 일종의 트릭으로 사용하였다.  
+  
+  - `scale_y_reorder()`만 사용해서 순서를 바꾸는 것도 가능할 것 같은데 방법을 찾지 못하여서 예제로 남기지 못함.  
+
+```{r}
+word_topics %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>% 
+  mutate(topic = paste("Topic",topic)) %>% 
+  ggplot(aes(x = beta, y = reorder_within(term, beta, topic), fill = topic)) +
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(vars(topic), scales = "free_y") +
+  scale_y_reordered() +
+  labs(x = expression(beta), y = NULL)
+
+```
+
+
+- 다른 종류의 매트릭스를 만들어보자.  
+
+  - word_topics와 같은 방식으로 `tidy()`를 사용하여 topic_model에서 matrix를 만든다.  
+  
+  - 이전에는 beta값을 썼는데 이번에는 gamma값을 출력하도록 `matrix = "gamma"`를 입력한다. gamma도 동일하게 topic에서 해당 단어가 나올 확률을 뜻한다. 
+  
+  - `?stm_tidiers`항목에서 도움말을 찾을 수 있는데 matrix에 관한 내용으로 *Whether to tidy the beta (per-term-per-topic, default) or gamma/theta (per-document-per-topic) matrix. The stm package calls this the theta matrix, but other topic modeling packages call this gamma.*와 같이 설명되어 있다. 즉 이전에는 topic에 따른 term(word)의 probability를 나타내기 위해 beta를 사용했다면 이번에는 topic에 따른 document(song)의 probability를 나타내야 하기 때문에 gamma로 설정했다.  
+  
+  - `document_names` argument는 도움말에 *Optional vector of document names for use with per-document-per-topic tidying*로 나타나있다. 즉 topic에 따른 document(song)를 사용하기 위해 옵션으로 사용하는 것인데, document 열이 생성될건데 document열은 노래제목(song)으로 넣으라는 뜻이다. 그래서 31곡을 topic별로 gamma값을 구하기 때문에 31곡 X 4개 topic = 124행의 데이터가 생기는데 topic별로 31개 행의 document 열에는 노래제목(=rownames(lyrics_sparse))가 입력된다.   
+
+
+```{r}
+song_topics <- tidy(topic_model, matrix = "gamma", 
+                    document_names = rownames(lyrics_sparse))
+
+song_topics
+
+```
+
+- 이렇게 만든 song_topic을 이용하여 다른 시각화를 해보자.  
+
+- 이전과 동일하게 `fct_reorder()`을 이용해서 gamma 순서대로 document를 정렬하고, topic은 fator로 바꾼다.  
+
+- document별로 facet을 시키면 총 31개의 plot이 그려져서 보기가 쉽지 않다.  
+
+```{r}
+song_topics %>% 
+  mutate(document = fct_reorder(document, gamma),
+         topic = factor(topic)) %>% 
+  ggplot(aes(x = topic, y = gamma, fill = topic)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(document))
+
+```
+
+- 보기 쉽게 x와 y 값을 바꾼다. 즉 y에 document를 두고 x축에 gamma값을 배치한다.  
+
+```{r}
+song_topics %>% 
+  mutate(document = fct_reorder(document, gamma),
+         topic = factor(topic)) %>% 
+  ggplot(aes(x = gamma, y = topic, fill = topic)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(document), scales = "free_y", ncol = 4) +
+  labs(x = expression(gamma), y = "Topic")
+
+```
+
+- `stm`package에 있는 `estimateEffect()`를 사용해본다.  
+
+- 도움말에는 *Estimates a regression where documents are the units, the outcome is the proportion of each document about a topic in an STM model and the covariates are document-meta data. This procedure incorporates measurement uncertainty from the STM model using the method of composition.* 로 함수에 대한 설명이 나와있다.  
+
+- 번역을 돌려보면 *문서가 단위이고 결과가 STM 모델의 주제에 대한 각 문서의 비율이고 공변량이 문서-메타 데이터인 회귀를 추정합니다. 이 절차는 구성 방법을 사용하여 STM 모델의 측정 불확실성을 통합합니다.* 로 나온다.  
+
+- 도움말에 있는 Examples를 보면 `stm()`으로 만든 모델을 가지고 회귀식을 만드는 것으로 보인다. 
+
+  - `estimateEffect()`에 들어갈 argument는 순서대로 formula, stmobj, metadata이다. 다른 것들은 넣지 않고 이 것만 넣고도 예제에서는 돌아감.  
+
+  - '1:4'는 topic의 수를 의미한다. 도움말에 *A list of K elements each corresponding to a topic.*이라 되어 있다.  
+  
+  - 일반적인 회귀식을 만드는 것 처럼 종속변수(outcome) ~ 독립변수(predictors)로 쓴다. 따라서 "1:4 ~ album_name" 부분은 model fit에 해당하는 부분으로 보면 된다.  
+  
+  - predictors는 최초 데이터(lyrics)를 확인해보면 album_name을 포함한 9개 column에서 고를 수 있다. 여기서는 album제목으로 topic을 예측하는 것으로 작성해보자.  
+  
+ <!-- > names(lyrics) -->
+ <!-- [1] "artist_name"    "album_name"     "track_number"   "song_id"        "song_name"      "line_number"    -->
+ <!-- [7] "section_name"   "line"           "section_artist" -->
+
+  - stm으로 부터 나온 model out(stmobj)는 topic_model이므로 입력해 준다.  
+  
+  - `tidy_lyrics %>% distinct(song_name, album_name) %>% arrange(song_name)`을 metadata로 쓴다.  
+
+<!-- > tidy_lyrics %>% distinct(song_name, album_name) %>% arrange(song_name) -->
+<!-- # A tibble: 31 x 2 -->
+<!--    album_name song_name                  -->
+<!--    <chr>      <chr>                      -->
+<!--  1 Spice      2 Become 1                 -->
+<!--  2 Spiceworld Denying                    -->
+<!--  3 Spiceworld Do It                      -->
+<!--  4 Forever    Get Down With Me           -->
+<!--  5 Forever    Goodbye                    -->
+<!--  6 Forever    Holler                     -->
+<!--  7 Spice      If U Can't Dance           -->
+<!--  8 Forever    If You Wanna Have Some Fun -->
+<!--  9 Spice      Last Time Lover            -->
+<!-- 10 Forever    Let Love Lead the Way      -->
+<!-- # ... with 21 more rows -->
+
+
+```{r}
+effects <- 
+  estimateEffect(
+    1:4 ~ album_name,
+    topic_model,
+    tidy_lyrics %>% distinct(song_name, album_name) %>% arrange(song_name)
+  )
+
+
+```
+
+- `summary()`로 결과를 보면 모두 매우 큰 p-value가 나온다.  
+
+- 좀 더 쉽게 보기 위해 `tidy()`로 정리해보면 topic별로 p-value가 매우 크게 나오는 것을 봐서는 album_name과 topic은 유의미한 관계를 가지지 못한다는 것으로 알 수 있다. 
+
+```{r}
+summary(effects)
+
+tidy(effects)
+
+```
+
+
+
+<br>
+
+**END**
+
+<br>
+
+
+
+
+
+
+
+
+
