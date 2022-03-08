@@ -1,0 +1,105 @@
+---
+title: "Feature engineering & interpretable for xgboost with board game ratings"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+gc()
+
+knitr::opts_chunk$set(cache=TRUE, cache.lazy = TRUE, warning = FALSE,
+                      message = FALSE, echo = TRUE, dpi = 180,
+                      fig.width = 8, fig.height = 5)
+library(tidyverse)
+
+theme_set(theme_light())
+update_geom_defaults("rect", list(fill = "midnightblue", alpha = 0.8))
+
+```
+
+
+## Explore data
+
+```{r}
+ratings <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-01-25/ratings.csv")
+details <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-01-25/details.csv")
+
+head(ratings)
+head(details)
+```
+
+```{r}
+ratings_joined <-
+  ratings %>%
+  left_join(details, by = "id")
+
+head(ratings_joined)
+
+```
+
+```{r}
+ggplot(ratings_joined, aes(average)) +
+  geom_histogram(alpha = 0.8)
+
+```
+
+데이터에서 minage = NA 인 값을 제거하고 min_age를 4등분하여 범주화시킨다. 여기서 보면 minage는 0세 ~ 25세까지 분포하고 있고 NA값을 가진 데이터가 200개가 된다. 이 중 NA를 가진 데이터를 제외하고 cut_number로 4개 범주로 나이대를 구분(0~8세, 8~10세, 10~12세, 12~25세)한 다음 각 나이분포에 대한 평점을 박스로 그렸다.  
+
+```{r}
+ratings_joined %>% 
+  filter(!is.na(minage)) %>% 
+  mutate(minage = cut_number(minage, 4)) %>% 
+  ggplot(aes(minage, average, fill = minage)) + 
+  geom_boxplot(alpha = 0.2, show.legend = FALSE)
+
+
+```
+
+
+## Tune an xgboost model
+
+select에서 필요한 열을 골라낼 때 matches()를 사용하여 min 혹은 max를 찾아내었음. 그 다음 na.omit()를 이용하여 NA를 포함하고 있는 행을 모두 삭제    
+
+```{r}
+library(tidymodels)
+
+preprocess <- 
+  ratings_joined %>% 
+  select(name, average, matches("min|max"), boardgamecategory) %>% 
+  na.omit()
+
+preprocess
+
+```
+
+```{r}
+game_split <- 
+  preprocess %>% 
+  initial_split(strata = average)
+
+game_split
+
+```
+
+
+```{r}
+game_train <- training(game_split)
+game_test <- testing(game_split)
+
+set.seed(234)
+game_folds <- vfold_cv(game_train, strata = average)
+game_folds
+
+
+```
+
+### Preprocessing
+
+```{r}
+recipe(average ~ ., data = game_train) %>% 
+  update_role(name, new_role = "id")
+
+
+```
+
