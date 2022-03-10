@@ -96,10 +96,94 @@ game_folds
 
 ### Preprocessing
 
-```{r}
-recipe(average ~ ., data = game_train) %>% 
-  update_role(name, new_role = "id")
+1. step_token에 'custom_token' 옵션을 사용하기 위해 split_category()함수를 만든다.  
+  - str_split() 함수를 사용하여 콤마(,) 기준으로 단어를 나눈 후  
+  - str_remove_all() 함수를 이용하여 정규표현식으로 구두점([[:punct:]])을 없앤다. 
+  - str_squish() 함수를 사용하여 문자열 양 옆에 있는 공백 등을 제거. 중간에 있는 공백은 한 칸 짜리 공백 (' ') 으로 치환, 이 함수를 하용하지 않을 경우 아래 str_replace_all()로 공백을 언더스코어로 바꿀 때 언더스코어가 연달아 두 개가 붙는 경우가 발생한다.  
+  - str_to_lower() 함수를 이용하여 단어들을 소문자로 나눈다.  
+  - str_replace_all() 함수를 이용하여 공백을 언더스코어(_)로 변환한다.  
+  - 주의!! list나 vector 안에 있는 각각의 엘리먼트에 함수를 적용하기 위해서는 map() 함수를 써야 한다.  
 
+2. boardgamecategory를 tokenize한다. >> step_tokenize()  
+  - custom_token()을 사용하여 토크나이즈 시킬 때마다 구두점을 없애고 소문자로 만들게 한다.  
+
+3. 30개의 가장 일반적인 Category만 남긴다. >> step_tokenfilter()  
+  - max_tokens = 정수, max_times 및 min_times로 필터링한 후 상위 max_tokens 토큰만 유지. 기본값은 100  
+   
+4. 각 토큰들을 개별 열로 바꾸어 카테고리에 해당하는지 여부를 확인 >> step_tf() 
+
+5. 이렇게 recipe를 만들어서 bake()하여 확인하면 id속성으로 부여된 name을 제외하고는 모두 numeric으로 변경된 것을 확인할 수 있음.  
+
+6. board_category는 step_tokenfilter()에서 max_tokens = 30으로 준 것처럼 상위 30개만 나온 것을 확인할 수 있고, 
+
+
+```{r}
+library(textrecipes)
+
+# test for making function
+# x1 <- game_train %>% sample_n(1) %>% pull(boardgamecategory)
+# x1 %>% str_split(", ") %>% map(str_remove_all, "[[:punct:]]") %>% map(str_to_lower)
+
+
+split_category <- function(x) {
+  x %>% 
+    str_split(", ", ) %>% 
+    map(str_remove_all, "[[:punct:]]") %>% 
+    map(str_squish) %>% 
+    map(str_to_lower) %>% 
+    map(str_replace_all, " ", "_")
+}
+
+game_rec <- 
+  recipe(average ~ ., data = game_train) %>% 
+  update_role(name, new_role = "id") %>% 
+  step_tokenize(boardgamecategory, custom_token = split_category) %>% 
+  step_tokenfilter(boardgamecategory, max_tokens = 30) %>% 
+  step_tf(boardgamecategory)
+
+game_prep <- prep(game_rec)
+bake(game_prep, new_data = NULL) %>% str()
+
+```
+
+
+```{r}
+xgb_spec <- 
+  boost_tree(
+    trees = tune(),
+    mtry = tune(),
+    min_n = tune(),
+    learn_rate = 0.01
+  ) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+xgb_spec
+
+```
+
+```{r}
+xgb_wf <- workflow(game_rec, xgb_spec)
+
+xgb_wf
+```
+
+hyperparamter가 있기 때문에 빠르게 찾기 위해 racing approach를 사용하기 위해 `finetune`package를 사용  
+
+```{r}
+library(finetune)
+doParallel::registerDoParallel()
+
+set.seed(234)
+xgb_game_rs <- 
+  tune_race_anova(
+    xgb_wf,
+    game_folds,
+    grid = 20,
+    control = control_race(verbose_elim = TRUE)
+  )
+
+xgb_game_rs
 
 ```
 
