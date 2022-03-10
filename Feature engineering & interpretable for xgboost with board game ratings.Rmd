@@ -168,7 +168,10 @@ xgb_wf <- workflow(game_rec, xgb_spec)
 xgb_wf
 ```
 
-hyperparamter가 있기 때문에 빠르게 찾기 위해 racing approach를 사용하기 위해 `finetune`package를 사용  
+hyperparamter가 있기 때문에 빠르게 찾기 위해 racing approach를 사용하기 위해 `finetune`package를 사용   
+finetune::tune_race_anova는 계속해서 에러가 발생. 동일한 현상이 블로그를 보니 다수에게 발생함.
+패키지를 모두 업데이트하고 control에 pkgs = c("stringr")을 했는데도 계속 발생.  
+일단 tune_grid로 돌렸음.  
 
 ```{r}
 library(finetune)
@@ -176,14 +179,110 @@ doParallel::registerDoParallel()
 
 set.seed(234)
 xgb_game_rs <- 
-  tune_race_anova(
+  tune_grid(
     xgb_wf,
     game_folds,
     grid = 20,
-    control = control_race(verbose_elim = TRUE)
+    control = control_grid(verbose = TRUE, pkgs = c("stringr"))
   )
 
 xgb_game_rs
 
 ```
+
+## Evaluate model
+
+```{r}
+show_best(xgb_game_rs)
+
+```
+
+
+```{r}
+select_best(xgb_game_rs, "rmse")
+
+```
+
+hyperparameter를 튜닝했고, 그 결과를 아직 workflow에 반영하지 않았음. 여기까지는 죽 돌린 것이며 거기서 가장 좋은 값이 위의 값임. 이 값이 나오는 mtry, trees, min_n값을 workflow에 반영하여야 함.  
+
+last_fit()을 이용하여 test set으로 evaluation을 하여 fitting함. 여기까지 test set을 쓰지 않았음.
+
+```{r}
+xgb_last <- 
+  xgb_wf %>% 
+  finalize_workflow(select_best(xgb_game_rs, "rmse")) %>% 
+  last_fit(game_split)
+
+xgb_last
+
+```
+
+여기까지 한 후 아래에서 볼 수 있는 .estimate값이 test set에 대한 evaluation 결과임. (training set에 대한 값이 아님.)   
+
+test set의 rmse값이 training set의 rmse값보다 나쁘게 나왔음.
+
+```{r}
+xgb_last %>% collect_metrics()
+
+```
+
+
+```{r}
+library(vip)
+
+extract_workflow(xgb_last)
+
+```
+
+```{r}
+xgb_fit <- extract_fit_parsnip(xgb_last)
+
+class(xgb_fit)
+
+```
+
+
+```{r}
+vip(xgb_fit, geom = "point", num_feature = 12)
+
+```
+
+X_train에 matrix가 들어가야 하기 때문에 bake()에 composition 옵션을 이용하여 "matrix" 형태로 받음  
+
+```{r}
+library(SHAPforxgboost)
+
+game_shap <- 
+  shap.prep(
+    xgb_model = extract_fit_engine(xgb_fit),
+    X_train = bake(game_prep, 
+                   has_role("predictor"), 
+                   new_data = NULL, 
+                   composition = "matrix")
+  )
+
+game_shap
+
+```
+
+
+```{r}
+shap.plot.summary(game_shap)
+
+```
+
+
+```{r}
+shap.plot.dependence(
+  game_shap,
+  x = "minage",
+  color_feature = "minplayers",
+  size0 = 1.2,
+  smooth = FALSE, add_hist = TRUE
+)
+
+```
+
+
+
 
