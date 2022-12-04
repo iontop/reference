@@ -1,0 +1,168 @@
+---
+title: "report_sample"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(showtext)
+font_add_google("Noto Sans KR", family = 'noto')
+showtext_auto()
+
+theme_customs <- theme(
+  text = element_text(family = 'noto', size = 9),
+  plot.title.position = 'plot',
+  plot.title = element_text(
+    face = 'bold', 
+    colour = "#191970",
+    margin = margin(t = 2, r = 0, b = 7, l = 0, unit = "mm")
+  )
+)
+
+theme_set(theme_minimal() + theme_customs)
+```
+
+```{r}
+system.time(df <- read_csv("./dummy.csv"))
+```
+
+```{r}
+library(data.table)
+system.time(df <- fread("./dummy.csv"))
+```
+
+
+```{r}
+dwatt_lr <- step(lm(dwatt~p_ip+hrh_p+ssh_p), direction = "both")
+summary(dwatt_lr)
+
+```
+
+```{r}
+par(mfrow = c(2,2), family = "noto")
+plot(dwatt_lr, col = custom_color[3], cex = 0.2)
+```
+
+```{r}
+car::vif(dwatt_lr)
+```
+
+```{r}
+pred_mw <- predict(dwatt_lr, newdata = df, interval = 'confidence') %>% as.data.frame()
+df_lr <- bind_cols(df, pred_mw)
+head(df_lr)
+```
+
+```{r}
+df_lr %>% ggplot(aes(x = time)) + 
+  geom_line(aes(y = dwatt), color = custom_color[1]) +
+  geom_line(aes(y = fit), color = custom_color[2], lty = 2, alpha = 0.5) +
+  geom_ribbon(aes(y = fit, ymin = lwr, ymax = upr), alpha = 0.7) +
+  scale_x_datetime("Date", date_labels = "%m/%d", date_breaks = "6 hours",
+                   sec.axis = dup_axis(name = "Time", labels = scales::time_format("%H:%M")))
+```
+
+
+```{r}
+df_long <- df %>% pivot_longer(-time, names_to = "tag", values_to = "measured")
+
+p0 <- 
+  df_long %>% 
+  ggplot(aes(x = time, y = measured, color = tag)) + geom_line()
+
+p0
+```
+
+```{r}
+custom_color <- thematic::okabe_ito(6)
+
+```
+
+```{r}
+p1 <- p0 + scale_color_manual(values = custom_color)
+```
+
+```{r}
+library(gghighlight)
+
+p2 <- p1 + 
+  gghighlight(tag == 'p_ip', use_direct_label = F) +
+  labs(title = 'Highlight initial pressure')
+
+p2
+```
+
+```{r}
+sel_time <- df[df$dwatt == median(df$dwatt),1] %>% as.vector() %>% unlist() # extract datetime at specific event occuring
+
+p3 <- p1 +
+  gghighlight(tag %in% c('dwatt','p_ip'), 
+              time > sel_time,
+              use_direct_label = FALSE) +
+  geom_segment(x = sel_time, xend = sel_time, y = -Inf, yend = 900, lty = 2, col = 'gray') +
+  labs(title = "특정시점 이후 하일라이트")
+
+p3
+```
+
+```{r}
+library(ggh4x)
+
+axis_second <- df %>% help_secondary(primary = dwatt, secondary = ssh_p)
+
+p4 <- 
+  df %>% 
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = dwatt), colour = custom_color[1]) +
+  geom_line(aes(y = axis_second$proj(ssh_p)), color = custom_color[2]) +
+  scale_y_continuous(sec.axis = axis_second)
+
+p4
+```
+
+```{r}
+axis_second <- df %>% help_secondary(primary = c(600, 1000), secondary = c(0.1, 0.4), 
+                                     breaks = seq(0.1, 0.6, 0.05),
+                                     name = "Steam Seal Header Pressure")
+
+p5 <- 
+  df %>% 
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = dwatt), colour = custom_color[1], size = 1.5) +
+  geom_line(aes(y = axis_second$proj(ssh_p)), color = custom_color[2], alpha = 0.7) +
+  gghighlight(dwatt > 940) +
+  scale_y_continuous("Turbine output", sec.axis = axis_second) +
+  scale_x_datetime("Date", date_labels = "%m/%d", date_breaks = "6 hours",
+                   sec.axis = dup_axis(name = "Time", labels =  scales::time_format("%H:%M"))) +
+  labs(title = "보조축 사용 예시")
+
+p5
+```
+
+```{r}
+library(ggtext)
+library(glue)
+anno_text <- glue(
+  "<span style = 'color:{custom_color[1]};'>터빈출력</span>이 증가하는 동안 <br>
+  <span style = 'color:{custom_color[2]};'>Steam Seal Header 압력</span>은 일정한 범위 내에서
+  운전된다."
+)
+
+anno_text
+```
+
+```{r}
+df %>% 
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = dwatt), colour = custom_color[1], size = 1.5) +
+  geom_line(aes(y = axis_second$proj(ssh_p)), color = custom_color[2], alpha = 0.7) +
+  gghighlight(dwatt > 940) +
+  scale_y_continuous("Turbine output", sec.axis = axis_second) +
+  scale_x_datetime("Date", date_labels = "%m/%d", date_breaks = "6 hours",
+                   sec.axis = dup_axis(name = "Time", labels =  scales::time_format("%H:%M"))) +
+  labs(title = "보조축 사용 예시") +
+  annotate('richtext', x = as.POSIXct("2022-09-01 09:00"), y = 1025,
+           label = anno_text, family = 'noto',
+           hjust = 0, vjust =0, label.color = NA)
+```
+

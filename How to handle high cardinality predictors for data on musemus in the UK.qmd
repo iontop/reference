@@ -1,0 +1,273 @@
+---
+title: "Museums in the UK"
+author: "Junho Ahn"
+date: last-modified
+---
+
+```{r initialize}
+rm(list = ls())
+gc()
+
+```
+
+
+```{r setup}
+#| include: false
+
+library(knitr)
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE, warning = FALSE,
+                      message = FALSE, echo = TRUE, dpi = 180,
+                      fig.width = 8, fig.height = 5)
+
+library(tidyverse)
+theme_set(theme_minimal())
+update_geom_defaults("rect", list(fill = "midnightblue", alpha = 0.8))
+update_geom_defaults("line", list(color = "midnightblue", alpha = 0.8))
+
+```
+
+Let's analyze data on [museum in the UK](https://github.com/rfordatascience/tidytuesday/tree/master/data/2022/2022-11-22).   
+Our modeling goal is to predict whether a museum is accredited.
+
+## Explore data
+
+```{r}
+museums <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-11-22/museums.csv')
+
+museums %>% 
+  count(Accreditation)
+
+```
+
+```{r}
+top_subjects <- 
+  museums %>% 
+  count(Subject_Matter, sort = TRUE) %>% 
+  slice_max(n , n = 6) %>% 
+  pull(Subject_Matter)
+
+top_subjects
+```
+
+```{r}
+museums %>% 
+  filter(Subject_Matter %in% top_subjects) %>% 
+  count(Subject_Matter, Accreditation) %>% 
+  ggplot(aes(Accreditation, n, fill = Accreditation)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(Subject_Matter), scales = "free")
+
+```
+
+```{r}
+museums %>% 
+  count(Accreditation, Size)
+```
+
+```{r}
+museums %>% 
+  count(Accreditation, Governance)
+```
+
+```{r}
+top_gov <- 
+  museums %>% 
+  count(Governance, sort = TRUE) %>% 
+  slice_max(n , n = 4) %>% 
+  pull(Governance)
+
+top_gov
+
+```
+
+```{r}
+museums %>% 
+  filter(Governance %in% top_gov) %>% 
+  count(Governance, Accreditation) %>% 
+  ggplot(aes(Accreditation, n, fill = Accreditation)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(Governance), scales = "free_y")
+
+```
+
+```{r}
+museums_parsed <- 
+  museums %>% 
+  select(museum_id, Accreditation, Governance, Size, Subject_Matter, 
+         Year_opened, Year_closed, Area_Deprivation_index) %>% 
+  # Year_opened value = 1835:1835
+  mutate(Year_opened = parse_number(Year_opened),
+         Closed = if_else(Year_closed == "9999:9999", "Open", "Closed")) %>% 
+  select(-Year_closed) %>% 
+  na.omit() %>% 
+  mutate_if(is.character, as.factor) %>% 
+  mutate(museum_id = as.character(museum_id))
+
+glimpse(museums_parsed)
+
+```
+
+
+## Feature engineering
+
+```{r}
+library(tidymodels)
+
+set.seed(123)
+museum_split <- initial_split(museums_parsed, strata = Accreditation)
+museum_train <- training(museum_split)
+museum_test <- testing(museum_split)
+
+set.seed(234)
+museum_folds <- vfold_cv(museum_train, strata = Accreditation)
+museum_folds
+
+```
+
+```{r}
+library(embed) #recipe extension package
+
+museum_rec <- 
+  recipe(Accreditation ~ ., data = museum_train) %>% 
+  update_role(museum_id, new_role = "id") %>% 
+  step_lencode_glm(Subject_Matter, outcome = vars(Accreditation)) %>% 
+  step_dummy(all_nominal_predictors())
+
+museum_rec
+
+```
+
+```{r}
+prep(museum_rec)
+
+```
+
+```{r}
+prep(museum_rec) %>% bake(new_data = NULL)
+
+```
+
+```{r}
+prep(museum_rec) %>% bake(new_data = NULL) %>% skimr::skim()
+```
+
+```{r}
+prep(museum_rec) %>%
+  tidy()
+
+```
+
+```{r}
+prep(museum_rec) %>%
+  tidy(number = 1)
+
+```
+
+```{r}
+prep(museum_rec) %>%
+  tidy(number = 1) %>% 
+  filter(level == "..new")
+
+```
+
+
+## Build a model
+
+```{r}
+xgb_spec <- 
+  boost_tree(
+    trees = tune(),
+    min_n = tune(),
+    mtry = tune(),
+    learn_rate = 0.01
+  ) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xgb_wf <- workflow(museum_rec, xgb_spec)
+
+```
+
+```{r}
+library(finetune)
+doParallel::registerDoParallel()
+
+set.seed(345)
+xgb_rs <- 
+  tune_race_anova(
+    xgb_wf,
+    resamples = museum_folds,
+    grid = 15,
+    control = control_race(verbose_elim = TRUE)
+  )
+
+xgb_rs
+
+```
+
+## Evaluate and finalize model
+
+```{r}
+plot_race(xgb_rs)
+
+```
+
+```{r}
+collect_metrics(xgb_rs)
+
+```
+
+```{r}
+xgb_last <- 
+  xgb_wf %>% 
+  finalize_workflow(select_best(xgb_rs, "accuracy")) %>% 
+  last_fit(museum_split)
+
+```
+
+
+```{r}
+collect_metrics(xgb_last)
+
+```
+
+```{r}
+collect_predictions(xgb_last) %>% 
+  conf_mat(Accreditation, .pred_class)
+
+```
+
+```{r}
+collect_predictions(xgb_last) %>% 
+  conf_mat(Accreditation, .pred_class) %>% 
+  autoplot(type = "mosaic") # type = "heatmap"
+
+```
+
+```{r}
+collect_predictions(xgb_last) %>% 
+  conf_mat(Accreditation, .pred_class) %>% summary()
+
+```
+
+```{r}
+library("vip")
+xgb_last %>% 
+  extract_fit_engine() %>% 
+  vip()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,314 @@
+---
+title: "ggplot2 coloring guide"
+format: html
+---
+
+## 준비하기
+
+* showtext package를 이용하여 Noto Sans font 설정 
+* 그림 제목은 좌측 정렬, 색맹(color-blind)까지 고려한 [Okabe Ito color pallet ](https://jfly.uni-koeln.de/color/)사용  
+
+
+```{r}
+library(tidyverse)
+library(showtext)
+font_add_google("Noto Sans KR", family = 'noto')
+showtext_auto()
+
+theme_customs <- theme(
+  text = element_text(family = 'noto', size = 9),
+  plot.title.position = 'plot',
+  plot.title = element_text(
+    face = 'bold', 
+    colour = "#191970",
+    margin = margin(t = 2, r = 0, b = 7, l = 0, unit = "mm")
+  )
+)
+
+theme_set(theme_minimal() + theme_customs)
+```
+
+## 음영을 활용하자  
+
+```{r}
+mpg %>% 
+  ggplot(aes (x = factor(year), fill = class)) +
+  geom_bar() +
+  labs(title = "mpg data set 예시", x = "year")
+```
+
+자동차 종류가 많아 7개의 컬러가 사용되었고 각 차종별 구별이 어려움.  
+여러 수준을 갖는 범주형 변수에 관한 색 사용에 있어서 더 적은, 최대 3개 정도의 컬러만 사용하여 시각화를 수행하는 방법을 고려함.  
+  
+  
+자동차 종류를 구분하기 위해 색조(hue)뿐만 아니라 음영(shade)를 활용하는 것이 필요.  
+즉 3가지 컬러를 사용하여 투명도를 다르게 주어 7개 자동차 종류를 구분함.  
+  
+  
+이를 위해 우선 자동차 종류를 3그룹으로 분류함.  
+
+```{r}
+# Group classes into three groups (to reduce colors to 3)
+dat <- mpg |> 
+  mutate(
+    year = factor(year),
+    class_group = case_when(
+      class %in% c('2seater', 'compact', 'midsize') ~ "grp1",
+      class == 'minivan' ~ "grp2",
+      T ~ "grp3"
+    )
+  )
+```
+
+2seater, compact, midsize는 grp1, minivan은 grp2, 나머지는 grp3으로 분류한 후 시각화를 수행함.  
+
+```{r}
+shades_plt <- dat |> 
+  ggplot(aes(x = year, fill = class_group, alpha = class)) +
+  geom_bar() +
+  labs(
+    x = 'Year',
+    y = 'Counts',
+    alpha = 'Class',
+    title = 'Show shades, not hues'
+  )
+shades_plt
+```
+
+색조와 음영까지 활용해 3가지 color로 줄이긴 했지만 아직 전달력이 떨어짐.  
+눈으로 색조와 음영을 조합해 자동차 종류를 구분하기는 쉽지 않음.  
+따라서 투명도와 색상을 manual로 조정  
+투명도는 suv ~ minivan까지 점차 줄어들고, minivan이후부터 다시 줄어든 양만큼 투명도가 늘어나도록 설정  
+
+```{r}
+# color-blind safe colors
+
+colors <-  thematic::okabe_ito(3)
+
+# [1] "#E69F00" "#009E73" "#0072B2"
+
+# possible levels of transparency (one for each class)
+alpha_max <- 1
+alpha_min <- 0.7
+alpha_vals <- c(
+  seq(alpha_max, alpha_min, length.out = 4),
+  seq(alpha_min, alpha_max, length.out = 4)[-1]
+  )
+
+alpha_vals
+```
+
+```{r}
+# tweak previous plot
+shades_plt <- shades_plt +
+  scale_fill_manual(values = colors) +
+  scale_alpha_manual(values = alpha_vals)
+
+shades_plt
+```
+
+우측 범례를 하나로 통합하여 설정, ggplot2에서 `guides()`함수를 사용  
+fill에 대한 범례(class_group)를 삭제한 후 guide_legend()를 통해 alpha에 관한 범례에 fill 색상을 가져와 사전에 설정한 3개 그룹(class_group)의 override함.  
+
+```{r}
+shades_plt <- shades_plt +
+  guides(
+    fill = guide_none(),
+    alpha = guide_legend(
+      override.aes = list(fill = colors[c(1,1,1,2,3,3,3)])
+    )
+  )
+
+shades_plt
+```
+
+## 음영만으로는 부족해  
+
+인접한 컬러 bar와 자동차 종류의 구분이 어려움. 이를 해결하기 위해 블록마다 선을 그어 주는 것이 필요. geom_bar()를 이용  
+
+```{r}
+dat %>% 
+  ggplot(aes(x = year, fill = class_group, alpha = class)) +
+  geom_bar(col = 'white') + # Add lines for distinction
+  scale_fill_manual(values = colors) +
+  scale_alpha_manual(values = alpha_vals) +
+  guides(
+    fill = guide_none(),
+    alpha = guide_legend(override.aes = list(fill = colors[c(1,1,1,2,3,3,3)]))
+  ) +
+  labs(x = '년도', y = '대수', alpha = 'Class',
+       title = '그룹 카테고리를 색으로 표현, \n음영으로 구분'
+  )
+```
+
+## 전달하고 싶은 내용만 강조하자  
+
+[Our world in Data](https://ourworldindata.org/time-with-others-lifetime)에서 가져온 "삶에서 누구와 가장 많은 시간을 보내는가?" 데이터로 그래프를 그려본다.  
+
+```{r}
+# Some data wrangling
+time_data <- read_csv("./time-spent-with-relationships-by-age-us.csv") |> 
+  rename_with(
+    ~c('Entitity', 'Code', 'Age', 'alone', 'friends', 'children', 'parents', 
+       'partner', 'coworkers')
+  ) |> 
+  pivot_longer(
+    cols = alone:coworkers, 
+    names_to = 'person',
+    values_to = 'minutes'
+  ) |> 
+  janitor::clean_names() |> 
+  filter(age <= 80)
+
+# Color-blind safe colors
+colors <- thematic::okabe_ito(7)[-6]
+
+# Line plot
+p <- time_data |> 
+  ggplot(aes(x = age, y = minutes, col = person)) +
+  geom_line(size = 1.5) +
+  scale_color_manual(values = colors) +
+  coord_cartesian(xlim = c(15, 81), expand = F) +
+  scale_y_continuous(minor_breaks = NULL) +
+  labs(x = 'Age (in years)', y = 'Minutes', col = 'Time spent')
+p
+```
+
+<br>
+
+이러한 그래프를 스파게티 플롯(spaghetti plot)이라고 함.  
+
+이 그래프는 보고 인사이트를 얻기가 어려움. `gghighlight` package를 이용하여 원하는 선만 하일라이트 할 수 있음.    
+
+```{r}
+library(gghighlight)
+alone_plt <- p + 
+  gghighlight(person == 'alone', use_direct_label = F) +
+  labs(title = 'Emphasize just one or a few categories')
+alone_plt
+```
+
+그래프만으로 전달하고자 하는 메시지가 명확하게 드러나지 않을 때는 `annotate()` 함수를 이용하여 원하는 위치에 넣을 수 있다.  
+
+```{r}
+alone_plt +
+  annotate(
+    'text',
+    x = 15,
+    y = 455,
+    label = 'We spend a lot of time alone...',
+    hjust = 0,
+    vjust = 0,
+    family = 'noto',
+    size = 7
+  )
+```
+
+
+```{r}
+age_40_plt <- p + 
+  gghighlight(
+    person %in% c('alone', 'children'), 
+    age >= 38, 
+    use_direct_label = F
+  ) +
+  geom_segment(x = 38, xend = 38, y = -Inf, yend = 300, linetype = 2, col = 'grey20') +
+  labs(title = 'Emphasize just one or a few categories') 
+
+age_40_plt +
+  annotate(
+    'text',
+    x = 15,
+    y = 403,
+    label = '약 40세 이후부터는\n자녀들과 보내는 시간보다\n혼자 보내는 시간이 많아집니다.',
+    hjust = 0,
+    vjust = 0,
+    family = 'noto',
+    lineheight = 1.0,
+    size = 4.5
+  )
+```
+
+## 라벨링 활용하기   
+
+때로 범례는 집중도를 낮추기 때문에 범례를 없애고 플롯 내에 라벨링을 하여 정보를 전달할 수 있음.  
+싱글 라벨링의 경우는 `annotate()` 함수를 사용하고, 다중 라벨링의 경우는 `geom_text()` 함수를 사용함.  
+
+```{r}
+alone_plt +
+  annotate(
+    'text',
+    x = 15,
+    y = 455,
+    label = '우리는 많은 시간을 혼자 보냅니다...',
+    hjust = 0,
+    vjust = 0,
+    family = 'noto',
+    size = 5
+  ) +
+  annotate(
+    'text', 
+    x = 70, 
+    y = 410, 
+    label = '혼자',
+    hjust = 0,
+    vjust = 0,
+    size = 5,
+    family = 'noto',
+    color = colors[1]
+  ) +
+  labs(title = '라벨을 바로 작성하는 법') +
+  theme(legend.position = 'none')
+```
+
+위에서 '혼자'라는 글자가 두번 중복되어 사용되었는데, 플롯 좌측 상단의 글의 '혼자'라는 단어를 그래프와 같은 색으로 변경하여 정보를 전달할 수 있게 함.  
+
+```{r}
+library(ggtext)
+color_alone <- glue::glue(
+  "우리는 많은 시간을 <span style = 'color:{colors[1]};'>혼자</span> 보냅니다..."
+)
+color_alone
+```
+
+```{r}
+alone_plt +
+  labs(title = '라벨링에 직접 표기하기') +
+  annotate(
+    'richtext',
+    x = 15,
+    y = 400,
+    label = color_alone,
+    hjust = 0,
+    vjust = 0,
+    family = 'noto',
+    size = 5,
+    label.color = NA
+  ) +
+  theme(legend.position = 'none')
+```
+
+```{r}
+age_40_text <- glue::glue(
+  "약 40세 이후부터는<br>
+  <span style = 'color:{colors[2]};'>자녀</span>들과 보내는 시간보다<br>
+  <span style = 'color:{colors[1]};'>혼자</span> 보내는 시간이 많아집니다."
+)
+
+age_40_plt +
+  labs(title = '라벨링에 직접 표시하기') +
+  annotate(
+    'richtext',
+    x = 15,
+    y = 350,
+    label = age_40_text,
+    hjust = 0,
+    vjust = 0,
+    family = 'noto',
+    lineheight = 1.25,
+    size = 5,
+    label.color = NA
+  ) +
+  theme(legend.position = 'none')
+```
+
