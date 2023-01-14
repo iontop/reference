@@ -1,0 +1,144 @@
+---
+title: "Iterative Bayesian optimization of a classification model"
+format: html
+---
+
+## CELL SEGMENTING REVISITED
+
+```{r}
+library(tidymodels)
+library(modeldata)
+
+# Load Data
+data(cells)
+
+```
+```{r}
+set.seed(1234)
+
+tr_te_split <- initial_split(cells %>% select(-case), prop = 3/4)
+cell_train <- training(tr_te_split)
+cell_test <- testing(tr_te_split)
+
+set.seed(2345)
+
+folds <- vfold_cv(cell_train, v = 10)
+
+
+```
+
+## THE TUNING SCHEME
+
+Since the predictors are highly correlated, we can used a recipe to convert the original predictors to principal component scores.  
+
+
+```{r}
+library(themis)
+
+cell_pre_proc <- 
+  recipe(class ~ ., data = cell_train) %>% 
+  step_YeoJohnson(all_predictors()) %>% 
+  step_normalize(all_predictors()) %>% 
+  step_pca(all_predictors(), num_comp = tune()) %>% 
+  step_downsample(class)
+
+cell_pre_proc
+
+```
+
+```{r}
+svm_mod <- 
+  svm_rbf(mode = "classification",
+          cost = tune(),
+          rbf_sigma = tune()) %>% 
+  set_engine("kernlab")
+
+svm_mod
+
+```
+
+```{r}
+svm_wflow <- 
+  workflow() %>% 
+  add_model(svm_mod) %>% 
+  add_recipe(cell_pre_proc)
+
+svm_wflow
+
+```
+
+```{r}
+svm_set <- extract_parameter_set_dials(svm_wflow)
+
+svm_set
+
+```
+
+```{r}
+svm_set <- 
+  svm_set %>% 
+  update(num_comp = num_comp(c(0L, 20L)))
+
+svm_set
+
+```
+
+## SEQUENTIAL TUNING
+
+- **Exploration** means that the search will consider candidates in untested space.  
+
+- **Exploitation** focuses in areas where the previous best results occurred.  
+
+
+```{r}
+set.seed(3456)
+
+search_res <- 
+  svm_wflow %>% 
+  tune_bayes(
+    resamples = folds,
+    param_info = svm_set, # To use non-default parameter ranges
+    initial = 5, # Generate five at semi-random to start
+    iter = 50,
+    metrics = metric_set(roc_auc), #How to measure performance?
+    control = control_bayes(no_improve = 30, verbose = TRUE)
+  )
+
+
+```
+
+```{r}
+search_res
+
+```
+
+```{r}
+estimates <- 
+  collect_metrics(search_res) %>% 
+  arrange(.iter)
+
+estimates
+
+```
+
+```{r}
+show_best(search_res, metric = 'roc_auc')
+
+```
+
+```{r}
+autoplot(search_res, type = 'performance')
+
+```
+
+```{r}
+autoplot(search_res, type = 'parameters') + 
+  labs(x = "Iterations", y = NULL)
+
+```
+
+```{r}
+sessionInfo()
+
+```
+

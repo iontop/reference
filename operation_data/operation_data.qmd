@@ -1,0 +1,86 @@
+---
+title: "Operation Data Calculation Test"
+format: html
+---
+
+## Initializing
+
+```{r}
+graphics.off()
+rm(list = ls())
+gc()
+
+```
+
+## Loading Library
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(lubridate)
+library(gt)
+library(magrittr)
+
+```
+
+## Import PEP_FUNC
+
+```{r}
+source('./pep_func.R')
+```
+
+
+## Loading Data
+
+```{r}
+df <- fread('./sample_data.csv')
+
+head(df)
+```
+
+```{r}
+colnames(df) <- c("time","dwatt","thn",
+                  "hpip1","hpip2","hpip3","hpip4",
+                  "fsp1","fsp2",
+                  "cv_pos1","cv_pos2","cv_pos3","cv_pos4",
+                  "vent_vv","cv_inner_temp","cv_outer_temp",
+                  "lpa_bp1","lpa_bp2","lpa_bp3")
+```
+
+```{r}
+df$time <- as.POSIXct(df$time, format = "%Y-%m-%d %H:%M")
+
+```
+
+```{r}
+str(df)
+
+```
+
+```{r}
+df %<>% mutate(h_test = stmPTH(fsp1, cv_inner_temp), .after = 8)
+
+```
+
+
+```{r}
+# section efficiency test
+p1 <- 255.0 #bara
+h1 <- 3381.6 #kJ/kg
+p2 <- 59.82 #bara
+h2 <- 3018.9 #kJ/kg
+
+hp_eff <- section_eff(p1, h1, p2, h2, 1)
+
+hp_eff # excel pep_func result = 0.893039
+
+```
+
+```{r}
+# Temperature calculation test
+t1 <- stmPHT(p1, h1)
+
+t1 # 565C
+
+```
+

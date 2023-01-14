@@ -1,0 +1,217 @@
+---
+title: "Find high FREX and high lift words in Stranger Things dialogue"
+format: html
+date: last-modified
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r initialize}
+rm(list = ls())
+gc()
+
+```
+
+
+```{r setup}
+#| include: false
+
+library(knitr)
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE, warning = FALSE,
+                      message = FALSE, echo = TRUE, dpi = 180,
+                      fig.width = 8, fig.height = 5)
+
+library(tidyverse)
+theme_set(theme_minimal())
+update_geom_defaults("rect", list(fill = "midnightblue", alpha = 0.8))
+update_geom_defaults("line", list(color = "midnightblue", alpha = 0.8))
+
+```
+
+Let's analyze data on ["Stranger Things"](https://github.com/rfordatascience/tidytuesday/tree/master/data/2022/2022-10-18).   
+Our modeling goal is to discover topics in the show's dialogue.
+
+## Explore data
+
+```{r}
+library(tidyverse)
+
+episodes_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-10-18/stranger_things_all_dialogue.csv")
+
+
+dialogue <- 
+  episodes_raw %>% 
+  filter(!is.na(dialogue)) %>% 
+  mutate(season = paste0("season", season))
+
+
+```
+
+```{r}
+library(tidytext)
+
+tidy_dialogue <- 
+  dialogue %>% 
+  unnest_tokens(word, dialogue)
+
+
+```
+
+```{r}
+# only for check
+
+tidy_dialogue %>% count(word, sort = TRUE)
+
+tidy_dialogue %>% count(season, word, sort = TRUE)
+
+# season4가 가장 많은 빈도를 보이기 때문에 에피소드가 가장 많은 것이 아닌지 확인 필요
+tidy_dialogue %>% distinct(season, episode) %>% count(season)
+
+#홛인결과 season4도 동일하게 9개 episode가 있음에도 더 많이 말한 것으로 확인됨
+
+```
+
+```{r}
+#log-odds를 계산하게 도와주는 Package
+library(tidylo)
+
+tidy_dialogue %>% 
+  count(season, word, sort = TRUE) %>% 
+  bind_log_odds(season, word, n)
+
+```
+
+```{r}
+p <- 
+  tidy_dialogue %>% 
+  count(season, word, sort = TRUE) %>% 
+  bind_log_odds(season, word, n) %>% 
+  filter(n >20) %>% 
+  group_by(season) %>% 
+  slice_max(log_odds_weighted, n = 10) %>% 
+  ungroup()
+
+```
+
+```{r}
+p %>% 
+  mutate(word = reorder_within(word, log_odds_weighted, season)) %>% 
+  ggplot(aes(log_odds_weighted, word, fill = season)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(season), scales = "free") +
+  scale_y_reordered() +
+  labs(y = NULL)
+```
+
+## Train a topic model
+
+```{r}
+dialogue_sparse <- 
+  tidy_dialogue %>% 
+  mutate(document = paste(season, episode, sep = "_")) %>%  # sparse matrix로 변환하기 전 인식하기 쉽게 만들기 위해 "document" column으르 만듦
+  count(document, word) %>% 
+  filter(n > 5) %>% 
+  cast_sparse(document, word, n)
+
+
+dim(dialogue_sparse)
+```
+
+```{r}
+library(stm)
+
+set.seed(123)
+topic_model <- stm(dialogue_sparse, K = 5)
+
+summary(topic_model)
+
+```
+
+## Explore topic model results
+
+```{r}
+tidy(topic_model, matrix = "beta") %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>%
+  arrange(-beta) %>% 
+  mutate(rank = row_number()) %>%
+  ungroup() %>% 
+  select(-beta) %>%
+  arrange(topic) %>% 
+  pivot_wider(
+    names_from = "topic",
+    names_glue = "topic {.name}",
+    values_from = "term"
+  ) %>% 
+  select(-rank) %>% 
+  knitr::kable()
+  
+```
+
+
+```{r}
+# to use matrix = "frex" in tidy()
+# devtools::install_github("juliasilge/tidytext")
+# install gitbub version 'tidytext' needed
+
+tidy(topic_model, matrix = "frex") %>% 
+  group_by(topic) %>% 
+  slice_head(n = 10) %>%
+  mutate(rank = row_number()) %>%
+  ungroup() %>% 
+  arrange(topic) %>% 
+  pivot_wider(
+    names_from = "topic",
+    names_glue = "topic {.name}",
+    values_from = "term"
+  ) %>% 
+  select(-rank) %>% 
+  knitr::kable()
+
+```
+
+
+```{r}
+# to use matrix = "lift" in tidy()
+# devtools::install_github("juliasilge/tidytext")
+# install gitbub version 'tidytext' needed
+
+tidy(topic_model, matrix = "lift") %>% 
+  group_by(topic) %>% 
+  slice_head(n = 10) %>%
+  mutate(rank = row_number()) %>%
+  ungroup() %>% 
+  arrange(topic) %>% 
+  pivot_wider(
+    names_from = "topic",
+    names_glue = "topic {.name}",
+    values_from = "term"
+  ) %>% 
+  select(-rank) %>% 
+  knitr::kable()
+
+```
+
+
+```{r}
+episode_parsed <- 
+  tidy(topic_model, 
+       matrix = "gamma", 
+       document_names = rownames(dialogue_sparse)
+  ) %>% 
+  separate(document, c("season", "episode"))
+
+```
+
+
+```{r}
+episode_parsed %>% 
+  mutate(topic = factor(topic)) %>% 
+  ggplot(aes(topic, gamma, fill = topic)) + 
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  facet_wrap(vars(season)) +
+  labs(y = expression(gamma))
+
+```
+
+
