@@ -84,3 +84,22 @@ t1 # 565C
 
 ```
 
+```{r}
+# Calculate mean and standard deviation of the data
+mean_val <- mean(df$dwatt)
+sd_val <- sd(df$dwatt)
+
+# Create scatter plot with standard deviation, min, and max values as annotations
+ggplot(df, aes(x = 1:length(dwatt), y = dwatt)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = mean_val, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = mean_val + sd_val, linetype = "dashed", color = "blue") +
+  geom_hline(yintercept = mean_val - sd_val, linetype = "dashed", color = "blue") +
+  annotate("text", x = 1, y = max(df$dwatt), label = paste("Max =", max(df$dwatt)), color = "darkgreen", hjust = 0) +
+  annotate("text", x = 1, y = min(df$dwatt), label = paste("Min =", min(df$dwatt)), color = "darkgreen", hjust = 0) +
+  annotate("text", x = 1, y = mean_val + sd_val + 1, label = paste("SD =", round(sd_val, 2)), color = "blue", hjust = 0, vjust = -0.4) +
+  labs(x = "Index", y = "dwatt", title = "Scatter Plot of dwatt") +
+  theme_minimal()
+
+```
+

@@ -1,0 +1,60 @@
+---
+title: "IF97"
+format: html
+---
+
+```{r}
+library()
+
+# Warning in install.packages :
+#   package ‘if97’ is not available for this version of R
+
+# A version of this package for your version of R might be available elsewhere,
+# see the ideas at
+# https://cran.r-project.org/doc/manuals/r-patched/R-admin.html#Installing-packages
+
+
+```
+
+
+## if97: IAPWS-IF97 Equations for Regions 1, 2, 3 and 5
+
+**CRAN**  
+
+https://rdrr.io/cran/iapws/man/if97.html
+
+**Description**  
+
+Compute thermodynamic and transport properties of water and steam using the IAPWS industrial formulation 1997.
+
+**Usage**  
+
+if97(what, p, t, h, state = NULL)  
+
+**Author(s)**
+
+Jonathan Debove
+
+**References**
+
+1. International Association for the Properties of Water and Steam, IAPWS R7-97(2012), Revised Release on the IAPWS Industrial Formulation 1997 for the Thermodynamic Properties of Water and Steam.
+
+2. International Association for the Properties of Water and Steam, IAPWS R12-08(2008), Release on the IAPWS Formulation 2008 for the Viscosity of Ordinary Water Substance.
+
+3. International Association for the Properties of Water and Steam, IAPWS R15-11(2011), Release on the IAPWS Formulation 2011 for the Thermal Conductivity of Ordinary Water Substance.
+
+
+## Example
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this 
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).

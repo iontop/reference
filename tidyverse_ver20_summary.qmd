@@ -1,0 +1,54 @@
+---
+title: "Tidyverse 2.0 Update Test"
+format: html
+---
+
+```{r}
+library(tidyverse)
+```
+
+`tidyverse` package를 loading하면 위의 9개 package가 lodaing됨.  
+
+`lubridate` package가 자동으로 lodaing됨.  
+
+<br>
+
+## `conflicted` package
+
+`conflicted` package에 대한 설명에 비중을 두고 있음.
+
+`tidyverse` package를 load 할 때 conflicted package는 loading 되지 않는 것으로 보여짐.
+
+```{r}
+library(conflicted)
+
+```
+
+예를 들어 `filter` function을 사용할 경우 충돌이 나니 `::`을 사용하라고 표시하고 둘 중 하나를 계속해서 사용하고 싶다면 `conflicts_prefer` function을 사용하여 지정하라는 error message를 보여줌.  
+
+```{r}
+filter(mtcars, cyl == 6)
+
+```
+
+error message에 나온 것처럼 아래와 같이 funcation이 속한 package를 명시해주거나,  
+
+```{r}
+dplyr::filter(mtcars, cyl == 6) %>% head()
+
+```
+
+`conflicts_prefer` function을 사용하여 지정해 준 다음 사용하면 된다.  
+
+```{r}
+conflicts_prefer(dplyr::filter)
+
+```
+
+`conflicts_prefer` function에 의해 지정되었다는 message가 나오면 이제부터는 그냥 쓰면 된다.  
+
+```{r}
+filter(mtcars, cyl == 8) %>% head()
+
+```
+

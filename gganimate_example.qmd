@@ -1,0 +1,91 @@
+---
+title: "gganimate 실습"
+format: html
+---
+
+## Library loading & Data import
+
+```{r}
+rm(list = ls())
+gc()
+
+```
+
+
+```{r}
+library(tidyverse)
+library(gganimate)
+library(showtext)
+
+```
+
+```{r}
+font_add_google('Noto Sans KR', 'noto')
+showtext.auto()
+```
+
+
+```{r}
+df <- read_csv("전력판매단가.csv", locale=locale('ko',encoding='cp949'))
+
+```
+
+```{r}
+df$연도 <- as.integer(df$연도)
+```
+
+
+```{r}
+df %>% head()
+```
+
+
+```{r}
+df_long <- df %>% select(-c("합계")) %>% pivot_longer(!"연도", names_to = "용도", values_to = "단가")
+
+```
+
+```{r}
+df_long %>% head()
+
+```
+
+
+```{r}
+df_long %>% ggplot(aes(용도, 단가, fill = 용도)) + 
+  geom_col(alpha = 0.7, show.legend = FALSE) +
+  labs(title = "{frame_time} 년", x = "용도", y = "단가(원/kWh)") +
+  theme_minimal() +
+  transition_time(연도) +
+  enter_fade() + 
+  exit_fade() +
+  ease_aes('sine-in-out')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
