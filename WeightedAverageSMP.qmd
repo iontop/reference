@@ -1,0 +1,134 @@
+---
+title: "가중평균SMP"
+format: html
+---
+
+## Initialize
+
+```{r}
+rm(list = ls())
+gc()
+
+```
+
+## Library loading & Data import
+
+```{r}
+library(tidyverse)
+library(showtext)
+```
+
+한글사용을 위하여 `showtext_auto()`를 사용  
+
+```{r}
+font_add_google('Noto Sans KR', 'noto')
+showtext.auto()
+
+```
+
+```{r}
+df <- read_csv("가중평균SMP.csv", locale = locale("ko", encoding = "cp949"), skip = 1)
+hdr <- read_csv("가중평균SMP.csv", locale = locale("ko", encoding = "cp949"), n_max = 1)
+
+```
+
+불러온 데이터 확인
+
+```{r}
+df %>% head()
+
+```
+
+```{r}
+hdr %>% head()
+```
+
+## Pre-processing
+
+
+```{r}
+colnames(df) <- c("기간", "육지", "제주", "통합", "BLMP")
+
+```
+
+
+```{r}
+df %>% head()
+
+```
+
+```{r}
+df$기간 <- ym(df$기간)
+
+```
+
+```{r}
+df <- df %>% mutate("연도" = year(df$기간), "월" = month(df$기간), "분기" = quarter(df$기간),
+                    .before = "육지")
+
+```
+
+
+```{r}
+df %>% head()
+```
+
+```{r}
+df_long <- 
+  df %>% pivot_longer(-c("기간", "연도", "월", "분기", "BLMP"), names_to = "구분", values_to = "SMP")
+```
+
+
+
+## Visualization
+
+```{r}
+df_long %>% ggplot() + 
+  geom_line(aes(기간, SMP, color = 구분),alpha = 0.5) +
+  geom_point(aes(기간, SMP), alpha= 0.7, color = "#ffffff", size = 2, show.legend = FALSE) +
+  geom_point(aes(기간, SMP, color = 구분), size = 1, show.legend = FALSE) +
+  theme_minimal() +
+  labs(title = "HOME > 전력거래 > 계통한계가격 > 가중평균SMP", subtitle = "단위: 원/kWh",
+       x = "연도", y = "가중평균 SMP", color = NULL) +
+  theme(legend.position = "bottom")
+  
+
+```
+
+```{r}
+library(gganimate)
+
+df_long %>% ggplot(aes(구분, SMP, fill = 구분)) + 
+  geom_col(alpha = 0.7, show.legend = FALSE, position = "identity") +
+  labs(title = "{frame_time} 년", x = "구분", y = "단가(원/kWh)") +
+  theme_minimal() +
+  transition_time(as.integer(연도)) +
+  enter_fade() + 
+  exit_fade() +
+  ease_aes('sine-in-out')
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
