@@ -1,0 +1,236 @@
+---
+title: "Resampling to understand gender in art history textbooks"
+format: html
+---
+
+```{r setup}
+#| include: false
+
+library(knitr)
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE, warning = FALSE,
+                      message = FALSE, echo = TRUE, dpi = 180,
+                      fig.width = 8, fig.height = 5)
+
+library(tidyverse)
+
+theme_set(theme_minimal())
+update_geom_defaults("rect", list(fill = "midnightblue", alpha = 0.8))
+update_geom_defaults("line", list(color = "midnightblue", alpha = 0.8))
+
+```
+
+
+## Explore data
+
+데이터 분석에 사용될 데이터 셋은 [art history textbooks](https://github.com/rfordatascience/tidytuesday/blob/master/data/2023/2023-01-17/readme.md) 에서 확인이 가능함.  
+
+이번에 만들 모델의 목표는 textbook의 대표저자들의 성별이 얼마나 연관성을 가지는지 확인하는 것임.  
+
+```{r}
+library(arthistory)
+
+data(worksgardner)
+glimpse(worksgardner)
+
+```
+
+
+```{r}
+worksgardner %>% 
+  count(artist_gender)
+```
+
+성별 확인 결과 남성이 여성 대비 10배 가까이 많은 것으로 나타났으며, 성별이 파악되지 않는 경우도 64건이 발견  
+
+```{r}
+worksgardner %>% 
+  count(publication_year, artist_gender)
+
+```
+
+위 데이터로 시각화를 해 보면,
+
+```{r}
+worksgardner %>% 
+  count(publication_year, artist_gender) %>% 
+  group_by(publication_year) %>%  # 그래프를 비율로 나타내기 위해 연도별로 그루핑한 후
+  mutate(proportion = n / sum(n)) %>%  # mutate()로 proportion 변수를 만들어 비율을 넣음
+  ggplot(aes(publication_year, proportion, fill = artist_gender)) +
+  geom_col(alpha = 0.8) +
+  scale_y_continuous(labels = scales::percent) # Y축의 값을 %로 나타내기 위해 
+
+```
+
+
+
+```{r}
+worksgardner %>% 
+  ggplot(aes(publication_year, area_of_work_in_book, fill = artist_gender)) +
+  geom_boxplot(alpha = 0.8)
+
+```
+
+
+```{r}
+worksgardner %>% 
+  mutate(
+    publication_year = 10 * (publication_year %/% 10),  # %%: 나머지, %/%: 몫 
+    publication_year = factor(publication_year)) %>%    # 10년간의 데이터를 하나로 모으기 위해 
+  ggplot(aes(publication_year, area_of_work_in_book, fill = artist_gender)) +
+  geom_boxplot(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(vars(artist_gender), ncol = 1) +
+  scale_y_log10()
+
+```
+
+좀 더 쉽게 보기 위해 히스토그램을 그려본다.  
+
+```{r}
+worksgardner %>% 
+  ggplot(aes(area_of_work_in_book, fill = artist_gender)) +
+  geom_histogram(position = "identity", alpha = 0.5)
+
+```
+
+히스토그램의 Y축이 count이므로 density를 파악하기 위하여 ggplot의 aes()에 y축 속성을 추가함.  
+
+```{r}
+worksgardner %>% 
+  ggplot(aes(area_of_work_in_book, y = after_stat(density), fill = artist_gender)) +
+  geom_histogram(position = "identity", alpha = 0.5)
+
+```
+
+이렇게 하니 그래프를 읽어내기 불편하기 때문에 
+
+```{r}
+worksgardner %>% 
+  ggplot(aes(area_of_work_in_book, fill = artist_gender)) +
+  geom_histogram(position = "identity", alpha = 0.8) +
+  facet_wrap(vars(artist_gender), scales = "free_y", ncol = 1)
+
+```
+
+
+남성의 경우 long tail로 길게 뻗어 있기 때문에 x축에 log를 적용한다.
+
+```{r}
+worksgardner %>% 
+  ggplot(aes(area_of_work_in_book, fill = artist_gender)) +
+  geom_histogram(position = "identity", alpha = 0.8) +
+  facet_wrap(vars(artist_gender), scales = "free_y", ncol = 1) +
+  scale_x_log10()
+
+
+```
+
+
+## Using resampling
+
+```{r}
+works_subset <- 
+  worksgardner %>% 
+  filter(artist_gender %in% c("Male", "Female"),
+         area_of_work_in_book > 0) %>% 
+  mutate(area_of_work_in_book = log10(area_of_work_in_book))
+
+works_subset %>% head()
+
+```
+
+
+```{r}
+single_model <- lm(area_of_work_in_book ~ artist_gender + publication_year,
+                   data = works_subset)
+
+single_model %>% summary()
+
+```
+
+```{r}
+single_model %>% augment()
+
+```
+
+`augment()`를 사용하면 실제 값(area_of_work_in_book)과 피팅된 값(.fitted)을 확인할 수 있다.  
+
+```{r}
+par(mfrow = c(1,4)) #define plot area as one rows and four columns
+plot(single_model)
+
+```
+
+```{r}
+library(tidymodels)
+
+set.seed(123)
+folds <- bootstraps(works_subset, times = 1e3)
+
+```
+
+```{r}
+folds
+
+```
+
+```{r}
+folds$splits[[1]]
+```
+
+각 splits의 내용을 보기 위하여 `analysis()`를 사용
+
+```{r}
+folds$splits[[1]] %>% analysis()
+```
+
+각 split 내용으로 모델을 하나씩 만들기 위하여 `map()`함수를 이용하여 아래와 같이 작성한다.  
+
+data에 `analysis()`를 사용하여 각 splits의 내용을 뽑아내는 것이 중요하다.  
+
+```{r}
+linear_coefs <- 
+  folds %>% 
+  mutate(
+    model = map(splits,
+                ~ lm(area_of_work_in_book ~ artist_gender + publication_year,
+                     data = analysis(.))),
+    coef_info = map(model, tidy)
+  )
+
+linear_coefs
+
+```
+
+
+```{r}
+linear_coefs %>% 
+  unnest(coef_info)
+```
+
+이제 시각화를 해보자. 이전에 사용했던 `augment()`함수를 사용한다.  
+
+```{r}
+visual_model <- 
+  linear_coefs %>% 
+  slice_sample(n = 100) %>% 
+  mutate(augmented = map(model, augment))
+
+visual_model
+```
+
+```{r}
+unestted_model <- 
+  visual_model %>% 
+  unnest(augmented)
+
+unestted_model
+```
+
+
+```{r}
+unestted_model %>% 
+  ggplot(aes(publication_year, .fitted, color = artist_gender, group = id)) +
+  geom_line(alpha = 0.3, show.legend = FALSE) +
+  facet_wrap(vars(artist_gender))
+
+```
